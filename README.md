@@ -15,7 +15,6 @@ local multipliers = {}
 local cooldowns = {}
 local dailyClaimed = {}
 
--- Load player money
 local function loadPlayerData(player)
 	local success, data = pcall(function()
 		return MoneyStore:GetAsync(player.UserId)
@@ -27,14 +26,12 @@ local function loadPlayerData(player)
 	end
 end
 
--- Save player money
 local function savePlayerData(player, value)
 	pcall(function()
 		MoneyStore:SetAsync(player.UserId, value)
 	end)
 end
 
--- Load inventory
 local function loadInventory(player)
 	local success, data = pcall(function()
 		return InventoryStore:GetAsync(player.UserId)
@@ -46,14 +43,12 @@ local function loadInventory(player)
 	end
 end
 
--- Save inventory
 local function saveInventory(player, inventory)
 	pcall(function()
 		InventoryStore:SetAsync(player.UserId, inventory)
 	end)
 end
 
--- Check cooldown
 local function canUse(player)
 	if not cooldowns[player.UserId] then
 		return true
@@ -68,7 +63,6 @@ local function setCooldown(player)
 	cooldowns[player.UserId] = os.time() + COOLDOWN_TIME
 end
 
--- Give tool
 local function givePlayerTool(player, toolName)
 	local backpack = player:FindFirstChild("Backpack")
 	if not backpack then return end
@@ -76,8 +70,42 @@ local function givePlayerTool(player, toolName)
 	if tool then
 		tool:Clone().Parent = backpack
 		local inventory = loadInventory(player)
-		table.insert(inventory, toolName)
-		saveInventory(player, inventory)
+		if not table.find(inventory, toolName) then
+			table.insert(inventory, toolName)
+			saveInventory(player, inventory)
+		end
+	end
+end
+
+local function ownsTool(player, toolName)
+	local inventory = loadInventory(player)
+	return table.find(inventory, toolName) ~= nil
+end
+
+local function removeTool(player, toolName)
+	local inventory = loadInventory(player)
+	for i = #inventory, 1, -1 do
+		if inventory[i] == toolName then
+			table.remove(inventory, i)
+		end
+	end
+	saveInventory(player, inventory)
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack then
+		local tool = backpack:FindFirstChild(toolName)
+		if tool then
+			tool:Destroy()
+		end
+	end
+end
+
+local function equipTool(player, toolName)
+	local backpack = player:FindFirstChild("Backpack")
+	if backpack then
+		local tool = backpack:FindFirstChild(toolName)
+		if tool then
+			tool.Parent = player.Character
+		end
 	end
 end
 
@@ -101,9 +129,16 @@ local function resetMultiplier(player)
 	multipliers[player.UserId] = 1
 end
 
-local function updateLeaderboard(player)
+local function bonusMoney(player, bonus)
+	addMoney(player, bonus)
 end
 
+local function tradeMoneyForTool(player, price, toolName)
+	if player.leaderstats.Money.Value >= price and not ownsTool(player, toolName) then
+		removeMoney(player, price)
+		givePlayerTool(player, toolName)
+	end
+end
 
 local function claimDaily(player)
 	local last = dailyClaimed[player.UserId] or 0
@@ -113,6 +148,17 @@ local function claimDaily(player)
 	end
 end
 
+local function updateLeaderboard(player)
+end
+
+local function getTopPlayers()
+	local list = {}
+	for _, player in ipairs(Players:GetPlayers()) do
+		table.insert(list, {player = player, money = player.leaderstats.Money.Value})
+	end
+	table.sort(list, function(a,b) return a.money > b.money end)
+	return list
+end
 
 Players.PlayerAdded:Connect(function(player)
 	local leaderstats = Instance.new("Folder")
@@ -165,7 +211,6 @@ Players.PlayerAdded:Connect(function(player)
 	end
 end)
 
-
 Players.PlayerRemoving:Connect(function(player)
 	savePlayerData(player, player.leaderstats.Money.Value)
 	saveInventory(player, loadInventory(player))
@@ -174,7 +219,6 @@ Players.PlayerRemoving:Connect(function(player)
 	dailyClaimed[player.UserId] = nil
 end)
 
--- Event handler
 event.OnServerEvent:Connect(function(player, amount)
 	if not canUse(player) then return end
 	setCooldown(player)
@@ -186,12 +230,17 @@ event.OnServerEvent:Connect(function(player, amount)
 	givePlayerTool(player, TOOL_NAME)
 end)
 
-
 function giveDoubleMoney(player)
 	multipliers[player.UserId] = 2
 end
 
--- Auto-save
+function giveTripleMoney(player, seconds)
+	multipliers[player.UserId] = 3
+	task.delay(seconds or 10, function()
+		resetMultiplier(player)
+	end)
+end
+
 task.spawn(function()
 	while true do
 		task.wait(AUTO_SAVE_INTERVAL)
@@ -204,7 +253,6 @@ task.spawn(function()
 	end
 end)
 
--- Reset multipliers periodically
 task.spawn(function()
 	while true do
 		task.wait(1)
